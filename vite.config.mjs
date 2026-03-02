@@ -7,7 +7,7 @@ import Components from 'unplugin-vue-components/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-    base: process.env.VITE_BASE ? process.env.VITE_BASE_URL + process.env.VITE_BASE : '/',
+    base: import.meta.env.VITE_BASE ? import.meta.env.VITE_BASE_URL + import.meta.env.VITE_BASE : '/',
 
     resolve: {
         alias: {
