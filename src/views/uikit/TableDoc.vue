@@ -182,9 +182,6 @@ const filteredTickets = computed(() => {
         data = data.filter((item) => new Date(item.timestamp) < end);
     }
 
-    console.log('Current sentiment filter:', filters.value.sentiment?.value);
-    console.log('Filtered rows:', filteredTickets.value?.length);
-
     return data;
 });
 

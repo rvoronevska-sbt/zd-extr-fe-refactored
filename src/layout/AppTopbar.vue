@@ -11,22 +11,17 @@ const authStore = useAuthStore();
 const router = useRouter();
 
 async function handleLogout() {
-    console.log('[Logout] doLogout started');
-
     try {
         await authStore.logout();
-        console.log('[Logout] authStore cleared');
 
         await nextTick();
 
         // Preferred: let router handle base path
         router.replace({ name: 'login' });
-        console.log('[Logout] Router replace to login route triggered');
     } catch (err) {
         console.error('[Logout] Error:', err);
 
         // Fallback hard redirect if router fails
-        console.log('[Logout] Fallback hard redirect');
         window.location.href = `${import.meta.env.BASE_URL}login`;
     }
 }
