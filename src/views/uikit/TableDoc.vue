@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 
 import { useArrayMultiSelects } from '@/composables/useArrayMultiSelects';
 import { useCSVExport } from '@/composables/useCSVExport';
+import { cleanAndFormatString } from '@/utils/stringUtils';
 
 import { useTableStore } from '@/stores/tableStore';
 
@@ -256,41 +257,6 @@ watch(
 function formatDate(value) {
     if (!value || !(value instanceof Date)) return '';
     return value.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-/**
- * Format ISO 8601 timestamps in transcript content to readable [MM/DD/YYYY HH:mm] format.
- * Extracts and replaces timestamps found at the start of lines (common in chat/email transcripts).
- * @param {string} transcript - Raw transcript text with embedded ISO 8601 timestamps
- * @returns {string} Transcript with formatted timestamps, or original if parsing fails
- */
-function formatTranscriptWithDates(transcript) {
-    if (!transcript) return '';
-
-    // Regex to match ISO 8601 timestamps at the start of lines
-    // Format: 2026-02-07T18:41:32.417000+00:00
-    const isoTimestampRegex = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z))\s+/g;
-
-    return transcript.replace(isoTimestampRegex, (match, timestamp) => {
-        try {
-            const date = new Date(timestamp);
-            // Validate date parsing succeeded
-            if (isNaN(date.getTime())) {
-                return match; // Return original if date is invalid
-            }
-
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            const year = date.getFullYear();
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-
-            return `[${month}/${day}/${year} ${hours}:${minutes}] `;
-        } catch (e) {
-            // Silently fallback to original on any parsing error
-            return match;
-        }
-    });
 }
 
 const { exportToCSV } = useCSVExport(dataTable, filteredTickets, filteredTickets, formatDate);
@@ -616,7 +582,7 @@ function clearFilter() {
             <div class="space-y-3 overflow-y-auto" style="max-height: 400px">
                 <div class="text-xs text-gray-500 dark:text-gray-400 px-4 pt-2 font-semibold tracking-wide">Ticket Date: {{ formatDate(currentChatDate) }}</div>
                 <div class="whitespace-pre-wrap break-words text-sm p-4 bg-surface-50 dark:bg-surface-900 rounded font-mono">
-                    {{ formatTranscriptWithDates(currentChatTranscript) }}
+                    {{ cleanAndFormatString(currentChatTranscript) }}
                 </div>
             </div>
             <template #footer>
@@ -629,7 +595,7 @@ function clearFilter() {
             <div class="space-y-3 overflow-y-auto" style="max-height: 400px">
                 <div class="text-xs text-gray-500 dark:text-gray-400 px-4 pt-2 font-semibold tracking-wide">Ticket Date: {{ formatDate(currentEmailDate) }}</div>
                 <div class="whitespace-pre-wrap break-words text-sm p-4 bg-surface-50 dark:bg-surface-900 rounded font-mono">
-                    {{ formatTranscriptWithDates(currentEmailTranscript) }}
+                    {{ cleanAndFormatString(currentEmailTranscript) }}
                 </div>
             </div>
             <template #footer>

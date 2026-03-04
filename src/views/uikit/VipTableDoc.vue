@@ -5,23 +5,50 @@ import { computed } from 'vue';
 const tableStore = useTableStore();
 
 // ────────────────────────────────────────────────
+// Memoization cache for dateRange computation (optimized for 10000+ record datasets)
+// Follows the same memoization pattern as tableStore.cachedStats
+// Only recalculates when filtered dataset size changes, avoiding O(n) operations on every render
+let cachedDateRange = null;
+let cachedFilteredCustomersLength = 0;
+
+// ────────────────────────────────────────────────
 // 1. Get filtered customers from store (reactive)
 const filteredCustomers = computed(() => tableStore.filteredCustomers || []);
 
 // ────────────────────────────────────────────────
 // 2. Compute date range from filtered data (min/max timestamp)
+// OPTIMIZED: Memoized – only recalculates when dataset size changes (single-pass O(n))
 const dateRange = computed(() => {
-    if (!filteredCustomers.value.length) return { start: null, end: null };
+    const currentLength = filteredCustomers.value.length;
+    
+    // Return cached value if dataset size hasn't changed
+    if (cachedDateRange !== null && cachedFilteredCustomersLength === currentLength) {
+        return cachedDateRange;
+    }
+
+    if (!currentLength) {
+        cachedDateRange = { start: null, end: null };
+        cachedFilteredCustomersLength = currentLength;
+        return cachedDateRange;
+    }
+
     let min = new Date(filteredCustomers.value[0].timestamp);
     let max = new Date(filteredCustomers.value[0].timestamp);
-    filteredCustomers.value.forEach((c) => {
-        const ts = new Date(c.timestamp);
+    
+    // Single-pass iteration (O(n) only when dataset size changes)
+    for (let i = 1; i < currentLength; i++) {
+        const ts = new Date(filteredCustomers.value[i].timestamp);
         if (ts < min) min = ts;
         if (ts > max) max = ts;
-    });
+    }
+    
     min.setHours(0, 0, 0, 0);
     max.setHours(23, 59, 59, 999);
-    return { start: min, end: max };
+    
+    cachedDateRange = { start: min, end: max };
+    cachedFilteredCustomersLength = currentLength;
+    
+    return cachedDateRange;
 });
 
 // ────────────────────────────────────────────────
