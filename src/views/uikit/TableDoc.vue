@@ -376,11 +376,11 @@ function clearFilter() {
     <div class="data-table card mt-8">
         <!-- Info card -->
         <div class="dt-info-card card mb-8 p-4">
-            <p v-if="paginatedTickets.length > 0">
+            <p class="inline-block dt-info-p rounded-xl py-2 px-3" v-if="paginatedTickets.length > 0">
                 Showing <strong>{{ paginatedTickets.length }}</strong> tickets on page {{ lazyParams.page }} (total: <strong>{{ totalRecords }}</strong
                 >).
             </p>
-            <p v-else>No tickets found on this page.</p>
+            <p class="inline-block dt-info-p rounded-xl py-2 px-3" v-else>No tickets found on this page.</p>
             <p>Tip: Use filters to narrow results. Export includes current filtered page only.</p>
         </div>
 
