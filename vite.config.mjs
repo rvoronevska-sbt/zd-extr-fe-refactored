@@ -28,13 +28,6 @@ export default defineConfig({
         tailwindcss(),
         Components({
             resolvers: [PrimeVueResolver()]
-        }),
-        visualizer({
-            open: true, // ← auto opens browser after build
-            filename: './dist/stats.html', // where to save the report
-            gzipSize: true, // show gzipped sizes (very useful)
-            template: 'treemap', // or 'sunburst', 'network', 'flamegraph'
-            emitFile: false // false = save to file, true = emit as asset
         })
     ],
 
