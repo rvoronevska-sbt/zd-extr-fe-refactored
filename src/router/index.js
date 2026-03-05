@@ -1,11 +1,9 @@
 import { useAuthStore } from '@/stores/auth';
-import { createRouter, createWebHashHistory } from 'vue-router';
-
-// Lazy-load routes for better initial bundle size
-const HomeView = () => import('@/views/HomeView.vue');
-const AccessDenied = () => import('@/views/pages/auth/Access.vue');
-const Error = () => import('@/views/pages/auth/Error.vue');
-const Login = () => import('@/views/pages/auth/Login.vue');
+import { createRouter, createWebHistory } from 'vue-router';
+import Login from '@/views/pages/auth/Login.vue';
+import HomeView from '@/views/HomeView.vue';
+import AccessDenied from '@/views/pages/auth/Access.vue';
+import Error from '@/views/pages/auth/Error.vue';
 
 const routes = [
     { path: '/login', name: 'login', component: Login, meta: { requiresGuest: true, hideNavbar: true } },
@@ -16,7 +14,7 @@ const routes = [
 ];
 
 const router = createRouter({
-    history: createWebHashHistory(import.meta.env.BASE_URL),
+    history: createWebHistory(import.meta.env.BASE_URL),
     routes,
     scrollBehavior: () => ({ top: 0 })
 });
