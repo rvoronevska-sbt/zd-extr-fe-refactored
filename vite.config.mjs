@@ -6,7 +6,8 @@ import Components from 'unplugin-vue-components/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-    base: process.env.NODE_ENV === 'production' ? 'localhost' : '/',
+    // base: process.env.NODE_ENV === 'production' ? 'localhost' : '/',
+    base: '/zd-extr-fe/', // Uncomment and set this if deploying to a subdirectory (e.g., GitHub Pages)
 
     resolve: {
         alias: {
@@ -27,16 +28,6 @@ export default defineConfig({
         tailwindcss(),
         Components({
             resolvers: [PrimeVueResolver()]
-<<<<<<< HEAD
-=======
-        }),
-        visualizer({
-            open: true,
-            filename: './dist/stats.html',
-            gzipSize: true,
-            template: 'treemap',
-            emitFile: false
->>>>>>> 1b17196 (prepared for production)
         })
     ],
 
@@ -73,8 +64,8 @@ export default defineConfig({
         proxy: {
             '/api': {
                 target: 'http://56.228.5.130',
-                changeOrigin: true,
-                secure: false,
+                changeOrigin: true
+                // secure: false
             }
         }
     }

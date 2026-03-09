@@ -9,5 +9,5 @@ const mode = computed(() => (isDarkTheme.value ? logoDark : logoLight));
 </script>
 
 <template>
-    <img :src="mode" class="logo" width="160" height="32" alt="Logo" />
+    <img :src="mode" class="logo" width="135" height="25" alt="Logo" />
 </template>

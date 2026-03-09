@@ -1,3 +1,7 @@
+const CSV_BYTES_PER_ROW = 200;        // rough estimate for file size warning
+const CSV_ROW_WARN_THRESHOLD = 10_000; // warn if export exceeds this many rows
+const CSV_SIZE_WARN_MB = 2;            // warn if estimated size exceeds this (MB)
+
 export function useCSVExport(dataTable, filteredRows, processedCustomers, formatDate) {
     const escapeCSVField = (field) => {
         if (field == null) return '';
@@ -7,8 +11,7 @@ export function useCSVExport(dataTable, filteredRows, processedCustomers, format
 
     // Calculate estimated file size
     const estimateFileSizeMB = (rowCount) => {
-        // Rough estimate: ~200 bytes per row for CSV data
-        const estimatedBytes = rowCount * 200;
+        const estimatedBytes = rowCount * CSV_BYTES_PER_ROW;
         return (estimatedBytes / (1024 * 1024)).toFixed(2);
     };
 
@@ -29,7 +32,7 @@ export function useCSVExport(dataTable, filteredRows, processedCustomers, format
         const estimatedSizeMB = estimateFileSizeMB(rowCount);
 
         // Warn if exporting large datasets (>10k rows or >2MB)
-        if (rowCount > 10000 || parseFloat(estimatedSizeMB) > 2) {
+        if (rowCount > CSV_ROW_WARN_THRESHOLD || parseFloat(estimatedSizeMB) > CSV_SIZE_WARN_MB) {
             const warned = confirm(
                 `⚠️ Large export detected!\n\n` +
                 `Rows: ${rowCount.toLocaleString()}\n` +
@@ -43,18 +46,18 @@ export function useCSVExport(dataTable, filteredRows, processedCustomers, format
 
         const rows = dataToExport.map((customer) => [
             formatDate(customer.timestamp),
-            customer.topic || 'none',
-            customer.ticketid || 'none',
-            customer.brand || 'none',
-            customer.vip_level || 'none',
-            customer.customer_email || 'none',
-            customer.agent_email || 'none',
-            customer.csat_score || 'none',
-            Array.isArray(customer.chat_tags) ? customer.chat_tags.join('; ') : customer.chat_tags || 'No Data',
-            customer.chat_transcript || 'No Data',
-            customer.email_transcript || 'No Data',
-            customer.sentiment || 'No Data',
-            customer.summary || 'No Data'
+            customer.topic,
+            customer.ticketid,
+            customer.brand,
+            customer.vip_level,
+            customer.customer_email,
+            customer.agent_email,
+            customer.csat_score,
+            customer._chatTagsString,
+            customer.chat_transcript,
+            customer.email_transcript,
+            customer.sentiment,
+            customer.summary
         ]);
 
         const csvLines = [headers.map(escapeCSVField).join(','), ...rows.map((row) => row.map(escapeCSVField).join(','))];

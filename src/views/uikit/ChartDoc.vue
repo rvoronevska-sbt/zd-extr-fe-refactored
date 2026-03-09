@@ -36,19 +36,19 @@ function setChartOptions() {
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <!-- Chart 1: Total + Negative -->
-            <div class="col-span-1">
+            <div class="col-span-3 lg:col-span-3">
                 <h3 class="font-medium text-center mb-3">Number of Chats</h3>
                 <Chart type="bar" :data="barDataTotalNegative" :options="chartOptions" />
             </div>
 
             <!-- Chart 2: Negative only -->
-            <div class="col-span-1">
+            <div class="col-span-3 lg:col-span-3">
                 <h3 class="font-medium text-center mb-3">Negative Chats by Topic</h3>
                 <Chart type="bar" :data="barDataNegativeOnly" :options="chartOptions" />
             </div>
 
             <!-- Chart 3: % Negative (line) -->
-            <div class="col-span-1">
+            <div class="col-span-3 lg:col-span-3">
                 <h3 class="font-medium text-center mb-3">% Negative Chats per Topic</h3>
                 <Chart type="line" :data="lineDataPercent" :options="chartOptions" />
             </div>

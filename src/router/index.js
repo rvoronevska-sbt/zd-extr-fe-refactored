@@ -10,7 +10,6 @@ const routes = [
     { path: '/', name: 'home', component: HomeView, meta: { requiresAuth: true } },
     { path: '/error', name: 'error', component: Error, meta: { hideNavbar: true } },
     { path: '/access-denied', name: 'access-denied', component: AccessDenied, meta: { hideNavbar: true } }
-    // { path: '/:pathMatch(.*)*', redirect: { name: 'error' } }
 ];
 
 const router = createRouter({

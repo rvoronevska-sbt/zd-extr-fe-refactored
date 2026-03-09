@@ -16,6 +16,8 @@ import '@/assets/styles.scss';
 
 import primeiconsFontUrl from 'primeicons/fonts/primeicons.woff2?url';
 
+import { useArrayMultiSelects } from '@/composables/useArrayMultiSelects';
+
 const app = createApp(App);
 
 const pinia = createPinia();
@@ -45,7 +47,6 @@ app.use(ConfirmationService);
 const authStore = useAuthStore();
 authStore.initializeAuth();
 
-import { useArrayMultiSelects } from '@/composables/useArrayMultiSelects';
 const { _lazyInit } = useArrayMultiSelects();
 _lazyInit(); // fire-and-forget — loads data in the background
 

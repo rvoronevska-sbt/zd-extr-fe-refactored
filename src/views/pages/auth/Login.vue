@@ -43,7 +43,6 @@ async function handleLogin() {
     // Clear previous errors
     formError.value = '';
     authStore.error = null;
-
     loading.value = true;
 
     try {
@@ -62,6 +61,7 @@ async function handleLogin() {
         // Remove shake after animation
         setTimeout(() => {
             shake.value = false;
+            router.replace({ name: 'error' });
         }, 600);
     } finally {
         loading.value = false;

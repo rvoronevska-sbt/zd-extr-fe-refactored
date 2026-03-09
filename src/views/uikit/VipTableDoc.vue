@@ -1,6 +1,11 @@
 <script setup>
 import { useTableStore } from '@/stores/tableStore';
 import { computed } from 'vue';
+import { formatDate } from '@/utils/dateUtils';
+import { VIP_SEGMENT_ORDER as SEGMENT_ORDER } from '@/config/enums';
+
+const CSAT_HIGH_THRESHOLD = 80; // % — green
+const CSAT_MID_THRESHOLD = 50;  // % — yellow; below this is red
 
 const tableStore = useTableStore();
 
@@ -51,87 +56,87 @@ const dates = computed(() => {
     return res;
 });
 
-const SEGMENT_ORDER = ['none', 'normal', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 
-const groupedData = computed(() => {
-    if (!filteredTickets.value.length) return [];
-
+function initVipStats(dateKeys) {
     const vipStats = {};
-
     SEGMENT_ORDER.forEach((vip) => {
         vipStats[vip] = {
             segment: vip.charAt(0).toUpperCase() + vip.slice(1),
-            perDate: {}
+            perDate: Object.fromEntries(dateKeys.map((k) => [k, { good: 0, bad: 0, rated: 0 }]))
         };
-        dates.value.forEach((date) => {
-            const dateKey = date.toISOString().split('T')[0];
-            vipStats[vip].perDate[dateKey] = { good: 0, bad: 0, rated: 0 };
-        });
     });
+    return vipStats;
+}
 
-    filteredTickets.value.forEach((customer) => {
+function aggregateTickets(vipStats, tickets) {
+    tickets.forEach((customer) => {
         const vip = (customer.vip_level || 'none').toLowerCase();
         const ts = new Date(customer.timestamp);
         ts.setHours(0, 0, 0, 0);
         const dateKey = ts.toISOString().split('T')[0];
-
-        if (vipStats[vip] && vipStats[vip].perDate[dateKey]) {
-            const csat = customer.csat_score?.toLowerCase();
-            if (csat === 'good') vipStats[vip].perDate[dateKey].good++;
-            if (csat === 'bad') vipStats[vip].perDate[dateKey].bad++;
-            if (csat === 'good' || csat === 'bad') vipStats[vip].perDate[dateKey].rated++;
-        }
+        const bucket = vipStats[vip]?.perDate[dateKey];
+        if (!bucket) return;
+        const csat = customer.csat_score?.toLowerCase();
+        if (csat === 'good') bucket.good++;
+        if (csat === 'bad') bucket.bad++;
+        if (csat === 'good' || csat === 'bad') bucket.rated++;
     });
+}
 
+function calcCsatPercentages(vipStats) {
     Object.values(vipStats).forEach((group) => {
-        Object.keys(group.perDate).forEach((dateKey) => {
-            const stats = group.perDate[dateKey];
+        Object.values(group.perDate).forEach((stats) => {
             stats.csat = stats.rated > 0 ? ((stats.good / stats.rated) * 100).toFixed(2) + '%' : '—';
         });
     });
+}
 
-    const rows = [];
-    SEGMENT_ORDER.forEach((vip) => {
-        if (vipStats[vip]) {
-            const group = vipStats[vip];
-            const row = { segment: group.segment };
-            dates.value.forEach((date) => {
-                const dateKey = date.toISOString().split('T')[0];
-                const stats = group.perDate[dateKey];
-                row[`good_${dateKey}`] = stats.good;
-                row[`bad_${dateKey}`] = stats.bad;
-                row[`rated_${dateKey}`] = stats.rated;
-                row[`csat_${dateKey}`] = stats.csat;
-            });
-            rows.push(row);
-        }
-    });
-
-    const totalRow = { segment: 'TOTAL' };
-    dates.value.forEach((date) => {
-        const dateKey = date.toISOString().split('T')[0];
-        let totalGood = 0,
-            totalBad = 0,
-            totalRated = 0;
-        Object.values(vipStats).forEach((group) => {
-            const stats = group.perDate[dateKey];
-            totalGood += stats.good;
-            totalBad += stats.bad;
-            totalRated += stats.rated;
+function buildRows(vipStats, dateValues) {
+    return SEGMENT_ORDER.filter((vip) => vipStats[vip]).map((vip) => {
+        const group = vipStats[vip];
+        const row = { segment: group.segment };
+        dateValues.forEach((date) => {
+            const dateKey = date.toISOString().split('T')[0];
+            const s = group.perDate[dateKey];
+            row[`good_${dateKey}`] = s.good;
+            row[`bad_${dateKey}`] = s.bad;
+            row[`rated_${dateKey}`] = s.rated;
+            row[`csat_${dateKey}`] = s.csat;
         });
-        totalRow[`good_${dateKey}`] = totalGood;
-        totalRow[`bad_${dateKey}`] = totalBad;
-        totalRow[`rated_${dateKey}`] = totalRated;
-        totalRow[`csat_${dateKey}`] = totalRated > 0 ? ((totalGood / totalRated) * 100).toFixed(2) + '%' : '—';
+        return row;
     });
-    rows.push(totalRow);
+}
 
+function buildTotalsRow(vipStats, dateValues) {
+    const totalRow = { segment: 'TOTAL' };
+    dateValues.forEach((date) => {
+        const dateKey = date.toISOString().split('T')[0];
+        let good = 0, bad = 0, rated = 0;
+        Object.values(vipStats).forEach((group) => {
+            const s = group.perDate[dateKey];
+            good += s.good;
+            bad += s.bad;
+            rated += s.rated;
+        });
+        totalRow[`good_${dateKey}`] = good;
+        totalRow[`bad_${dateKey}`] = bad;
+        totalRow[`rated_${dateKey}`] = rated;
+        totalRow[`csat_${dateKey}`] = rated > 0 ? ((good / rated) * 100).toFixed(2) + '%' : '—';
+    });
+    return totalRow;
+}
+
+const groupedData = computed(() => {
+    if (!filteredTickets.value.length) return [];
+    const dateKeys = dates.value.map((d) => d.toISOString().split('T')[0]);
+    const vipStats = initVipStats(dateKeys);
+    aggregateTickets(vipStats, filteredTickets.value);
+    calcCsatPercentages(vipStats);
+    const rows = buildRows(vipStats, dates.value);
+    rows.push(buildTotalsRow(vipStats, dates.value));
     return rows;
 });
 
-const formatDateHeader = (date) => {
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-};
 
 function getSegmentRowClass(segment) {
     const map = {
@@ -150,8 +155,8 @@ function getSegmentRowClass(segment) {
 function getCsatClass(csat) {
     if (!csat || csat === '—') return 'csat-none';
     const val = parseFloat(csat);
-    if (val >= 80) return 'csat-high';
-    if (val >= 50) return 'csat-mid';
+    if (val >= CSAT_HIGH_THRESHOLD) return 'csat-high';
+    if (val >= CSAT_MID_THRESHOLD) return 'csat-mid';
     return 'csat-low';
 }
 </script>
@@ -161,8 +166,8 @@ function getCsatClass(csat) {
         <!-- Info banner – matches TableDoc pattern -->
         <div class="dt-info-card card mb-6 p-4">
             <p class="inline-block dt-info-p rounded-xl py-2 px-3">
-                Aggregated from <strong>{{ tableStore.filteredTickets?.length || 0 }}</strong> filtered tickets &nbsp;·&nbsp; date range: <strong>{{ dateRange.start ? formatDateHeader(dateRange.start) : '—' }}</strong> to
-                <strong>{{ dateRange.end ? formatDateHeader(dateRange.end) : '—' }}</strong>
+                Aggregated from <strong>{{ tableStore.filteredTickets?.length || 0 }}</strong> filtered tickets &nbsp;·&nbsp; date range: <strong>{{ dateRange.start ? formatDate(dateRange.start) : '—' }}</strong> to
+                <strong>{{ dateRange.end ? formatDate(dateRange.end) : '—' }}</strong>
             </p>
         </div>
 
@@ -193,7 +198,7 @@ function getCsatClass(csat) {
             </Column>
 
             <!-- Dynamic date columns -->
-            <Column v-for="date in dates" :key="date.toISOString()" :header="formatDateHeader(date)" style="min-width: 148px; padding: 0">
+            <Column v-for="date in dates" :key="date.toISOString()" :header="formatDate(date)" style="min-width: 148px; padding: 0">
                 <template #body="{ data }">
                     <div class="date-cell">
                         <!-- CSAT row -->

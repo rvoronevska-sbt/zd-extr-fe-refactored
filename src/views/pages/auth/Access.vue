@@ -17,7 +17,7 @@ import FloatingConfigurator from '@/components/FloatingConfigurator.vue';
                             <span class="text-muted-color mb-8">You do not have the necessary permisions. Please contact admins.</span>
                             <img src="/assets/images/access/asset-access.svg" alt="Access denied" class="mb-8" width="440" height="316" />
                             <div class="col-span-12 mt-8 text-center">
-                                <Button id="access-go-to-dashboard-button" aria-label="access-go-to-dashboard" as="router-link" label="Go to Dashboard" to="/" severity="warn" />
+                                <Button id="access-go-back-to-login-button" aria-label="access-go-back-to-login" as="router-link" label="Go back to Login" to="/login" severity="warn" />
                             </div>
                         </div>
                     </div>

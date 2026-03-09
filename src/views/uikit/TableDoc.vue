@@ -1,12 +1,20 @@
 <script setup>
 import { FilterMatchMode, FilterOperator, FilterService } from '@primevue/core/api';
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import { useArrayMultiSelects } from '@/composables/useArrayMultiSelects';
 import { useCSVExport } from '@/composables/useCSVExport';
 import { cleanAndFormatString } from '@/utils/stringUtils';
+import { applyTicketFilters } from '@/utils/ticketFilters';
+import { formatDate } from '@/utils/dateUtils';
+import { CSAT_OPTIONS as csatOptions, SENTIMENT_OPTIONS as sentimentOptions } from '@/config/enums';
 
 import { useTableStore } from '@/stores/tableStore';
+
+const PAGE_SIZE_DEFAULT = 5;
+const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
+const FILTER_DEBOUNCE_MS = 500;
+const VIRTUAL_SCROLL_ITEM_SIZE = 60; // px — must match the rendered row height
 
 const tableStore = useTableStore();
 
@@ -23,20 +31,15 @@ FilterService.register('containsAny', (value, filter) => {
 // ────────────────────────────────────────────────
 // Composables & full data
 // ────────────────────────────────────────────────
-const { allChatTags, allTopics, allBrands, allVipLevels, allCustomerEmails, allAgentEmails, fullProcessedTickets } = useArrayMultiSelects(); // full dataset – no param
+const { allChatTags, allTopics, allBrands, allVipLevels, allCustomerEmails, allAgentEmails, fullProcessedTickets, isLoading } = useArrayMultiSelects(); // full dataset – no param
 
 // ────────────────────────────────────────────────
 // State
 // ────────────────────────────────────────────────
 const dataTable = ref(null);
-const loading = ref(false);
 
-// Constants (kept for CSAT & Sentiment – others moved to dynamic)
-const csatOptions = ['bad', 'good', 'unoffered'];
-const sentimentOptions = ['neutral', 'positive', 'very negative', 'very positive'];
-
-// Filters model – matches all column filterFields
-const filters = ref({
+// Factory – called once for init, again on clearFilter to get a fresh object
+const createInitialFilters = () => ({
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
     timestamp: {
         operator: FilterOperator.AND,
@@ -59,31 +62,22 @@ const filters = ref({
     summary: { value: null, matchMode: FilterMatchMode.CONTAINS }
 });
 
+const filters = ref(createInitialFilters());
+
 // Pagination state
 const lazyParams = ref({
     page: 1,
-    limit: 5
+    limit: PAGE_SIZE_DEFAULT
 });
 
 // Dialog state for transcript viewing
-const chatDialogVisible = ref(false);
-const emailDialogVisible = ref(false);
-const currentChatTranscript = ref('');
-const currentEmailTranscript = ref('');
-const currentChatDate = ref(null);
-const currentEmailDate = ref(null);
+const dialog = reactive({ visible: false, type: '', transcript: '', date: null });
 
-// Dialog handlers
-const openChatDialog = (transcript, timestamp) => {
-    currentChatTranscript.value = transcript;
-    currentChatDate.value = timestamp;
-    chatDialogVisible.value = true;
-};
-
-const openEmailDialog = (transcript, timestamp) => {
-    currentEmailTranscript.value = transcript;
-    currentEmailDate.value = timestamp;
-    emailDialogVisible.value = true;
+const openDialog = (type, transcript, timestamp) => {
+    dialog.type = type;
+    dialog.transcript = transcript;
+    dialog.date = timestamp;
+    dialog.visible = true;
 };
 
 // Inline debounce – no dependencies
@@ -107,111 +101,25 @@ const debounce = (fn, delay) => {
 // ────────────────────────────────────────────────
 // Filtered & paginated data (computed – full dataset filtering)
 // ────────────────────────────────────────────────
-const filteredTickets = computed(() => {
-    let data = [...fullProcessedTickets.value];
-
-    // Global search
-    if (filters.value.global?.value) {
-        const searchLower = filters.value.global.value.toLowerCase();
-        data = data.filter((item) => {
-            const stringMatch = [
-                String(item.ticketid || ''),
-                item.topic || '',
-                item.brand || '',
-                item.vip_level || '',
-                item.customer_email || '',
-                item.agent_email || '',
-                item.csat_score || '',
-                item.sentiment || '',
-                item.summary || '',
-                item.chat_transcript || '',
-                item.email_transcript || ''
-            ].some((val) => val.toLowerCase().includes(searchLower));
-
-            const tagsMatch = item.chat_tags?.some((tag) => tag.toLowerCase().includes(searchLower)) || false;
-
-            return stringMatch || tagsMatch;
-        });
-    }
-
-    // Ticket ID – (equals)
-    if (filters.value.ticketid?.value != null) {
-        const ticketIdFilter = String(filters.value.ticketid.value).trim();
-        if (ticketIdFilter) {
-            data = data.filter((item) => String(item.ticketid) === ticketIdFilter);
-        }
-    }
-
-    // Safe array filters
-    const safeArray = (arr) => arr ?? [];
-
-    if (safeArray(filters.value.brand?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value.brand.value).includes(item.brand));
-    }
-
-    if (safeArray(filters.value.topic?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value.topic.value).some((t) => item.topic?.includes(t)));
-    }
-
-    // VIP Level (contains any)
-    if (safeArray(filters.value.vip_level?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value.vip_level.value).includes(item.vip_level));
-    }
-
-    if (safeArray(filters.value.customer_email?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value.customer_email.value).some((email) => item.customer_email?.toLowerCase().includes(email.toLowerCase())));
-    }
-
-    if (safeArray(filters.value.agent_email?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value.agent_email.value).some((email) => item.agent_email?.toLowerCase().includes(email.toLowerCase())));
-    }
-
-    if (safeArray(filters.value._chatTagsString?.value).length > 0) {
-        data = data.filter((item) => safeArray(filters.value._chatTagsString.value).some((selected) => item.chat_tags?.includes(selected)));
-    }
-
-    // Single values
-    if (filters.value.csat_score?.value) {
-        data = data.filter((item) => item.csat_score === filters.value.csat_score.value);
-    }
-
-    // Text contains
-    if (filters.value.chat_transcript?.value) {
-        const searchLower = filters.value.chat_transcript.value.toLowerCase();
-        data = data.filter((item) => item.chat_transcript?.toLowerCase().includes(searchLower));
-    }
-
-    if (filters.value.email_transcript?.value) {
-        const searchLower = filters.value.email_transcript.value.toLowerCase();
-        data = data.filter((item) => item.email_transcript?.toLowerCase().includes(searchLower));
-    }
-
-    if (filters.value.summary?.value) {
-        const searchLower = filters.value.summary.value.toLowerCase();
-        data = data.filter((item) => item.summary?.toLowerCase().includes(searchLower));
-    }
-
-    // Sentiment equals
-    if (filters.value.sentiment?.value && filters.value.sentiment.value.trim()) {
-        const sentimentFilter = filters.value.sentiment.value.trim().toLowerCase();
-        data = data.filter((item) => {
-            const itemSentiment = item.sentiment?.trim().toLowerCase();
-            return itemSentiment === sentimentFilter;
-        });
-    }
-
-    // Date range
-    if (filters.value.timestamp.constraints[0]?.value) {
-        const start = new Date(filters.value.timestamp.constraints[0].value);
-        data = data.filter((item) => new Date(item.timestamp) >= start);
-    }
-    if (filters.value.timestamp.constraints[1]?.value) {
-        const end = new Date(filters.value.timestamp.constraints[1].value);
-        data = data.filter((item) => new Date(item.timestamp) < end);
-    }
-
-    return data;
-});
+const filteredTickets = computed(() =>
+    applyTicketFilters([...fullProcessedTickets.value], {
+        globalFilter: filters.value.global?.value || '',
+        ticketid: filters.value.ticketid?.value,
+        brand: filters.value.brand?.value ?? [],
+        topic: filters.value.topic?.value ?? [],
+        vip_level: filters.value.vip_level?.value ?? [],
+        customer_email: filters.value.customer_email?.value ?? [],
+        agent_email: filters.value.agent_email?.value ?? [],
+        _chatTagsString: filters.value._chatTagsString?.value ?? [],
+        csat_score: filters.value.csat_score?.value,
+        sentiment: filters.value.sentiment?.value,
+        chat_transcript: filters.value.chat_transcript?.value,
+        email_transcript: filters.value.email_transcript?.value,
+        summary: filters.value.summary?.value,
+        startDate: filters.value.timestamp?.constraints?.[0]?.value,
+        endDate: filters.value.timestamp?.constraints?.[1]?.value
+    })
+);
 
 const paginatedTickets = computed(() => {
     const start = (lazyParams.value.page - 1) * lazyParams.value.limit;
@@ -227,7 +135,7 @@ const totalRecords = computed(() => filteredTickets.value.length);
 // 1. Debounced page reset when filters change (increased to 500ms for better UX)
 const debouncedResetPage = debounce(() => {
     lazyParams.value.page = 1;
-}, 500); // Increased from 300ms to reduce excessive re-computations
+}, FILTER_DEBOUNCE_MS);
 
 // Deep watch on all filters – reset page on any change
 // Note: Deep watching is necessary here since filters contain nested objects
@@ -249,16 +157,6 @@ watch(
 // ────────────────────────────────────────────────
 // Export & format
 // ────────────────────────────────────────────────
-/**
- * Format a Date object to MM/DD/YYYY string.
- * @param {Date} value - Date object to format
- * @returns {string} Formatted date string or empty string if invalid
- */
-function formatDate(value) {
-    if (!value || !(value instanceof Date)) return '';
-    return value.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
 const { exportToCSV } = useCSVExport(dataTable, filteredTickets, filteredTickets, formatDate);
 
 // ────────────────────────────────────────────────
@@ -325,50 +223,8 @@ const toDate = computed({
 });
 
 function clearFilter() {
-    // Reset global filter safely
-    if (filters.value?.global) {
-        filters.value.global.value = null;
-    }
-
-    // Reset date constraints completely
-    if (filters.value?.timestamp?.constraints) {
-        filters.value.timestamp.constraints[0].value = null; // From / ≥
-        filters.value.timestamp.constraints[1].value = null; // To / <
-    } else if (filters.value?.timestamp) {
-        // Re-init if constraints missing
-        filters.value.timestamp = {
-            operator: FilterOperator.AND,
-            constraints: [
-                { value: null, matchMode: FilterMatchMode.DATE_AFTER },
-                { value: null, matchMode: FilterMatchMode.DATE_BEFORE }
-            ]
-        };
-    }
-
-    // Reset all other filters safely
-    if (filters.value) {
-        Object.keys(filters.value).forEach((key) => {
-            if (key === 'global' || key === 'timestamp') return; // already handled
-
-            const f = filters.value[key];
-            if (!f) return; // Skip if filter doesn't exist
-
-            if (f.constraints) {
-                f.constraints.forEach((c) => {
-                    if (c) c.value = null;
-                });
-            } else if (Array.isArray(f.value)) {
-                f.value = [];
-            } else if (f.value !== undefined) {
-                f.value = null;
-            }
-        });
-    }
-
-    // Reset pagination to page 1
-    if (lazyParams.value) {
-        lazyParams.value.page = 1;
-    }
+    filters.value = createInitialFilters();
+    lazyParams.value.page = 1;
 }
 </script>
 
@@ -392,16 +248,16 @@ function clearFilter() {
             :lazy="true"
             :totalRecords="totalRecords"
             :rows="lazyParams.limit"
-            :loading="loading"
+            :loading="isLoading"
             paginator
-            :rowsPerPageOptions="[5, 10, 20, 50, 100]"
+            :rowsPerPageOptions="PAGE_SIZE_OPTIONS"
             paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport RowsPerPageDropdown"
             currentPageReportTemplate="Showing {first} to {last} of {totalRecords}"
             :paginatorPosition="'both'"
             v-model:filters="filters"
             filterDisplay="menu"
             :globalFilterFields="['ticketid', 'topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', '_chatTagsString', 'chat_transcript', 'email_transcript', 'sentiment', 'summary']"
-            :virtualScrollerOptions="{ itemSize: 60 }"
+            :virtualScrollerOptions="{ itemSize: VIRTUAL_SCROLL_ITEM_SIZE }"
             responsiveLayout="scroll"
             showGridlines
             @page="onPage"
@@ -410,7 +266,7 @@ function clearFilter() {
             <!-- Header with quick filters, clear, export, global search -->
             <template #header>
                 <div class="flex justify-between">
-                    <Button type="button" icon="pi pi-filter-slash" label="Clear" outlined @click="clearFilter()" aria-label="Clear all filters" />
+                    <Button type="button" icon="pi pi-filter-slash" label="Clear all filters" outlined @click="clearFilter()" aria-label="Clear all filters" />
                     <div class="flex flex-wrap gap-3 items-center">
                         <!-- Quick date filters -->
                         <div class="flex gap-2">
@@ -534,7 +390,7 @@ function clearFilter() {
 
             <Column header="Chat Transcript" field="chat_transcript" filterField="chat_transcript" style="min-width: 12rem">
                 <template #body="{ data }">
-                    <Button v-if="data.chat_transcript" label="View" icon="pi pi-external-link" @click="openChatDialog(data.chat_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View chat transcript" />
+                    <Button v-if="data.chat_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Chat', data.chat_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View chat transcript" />
                     <span v-else>—</span>
                 </template>
 
@@ -545,7 +401,7 @@ function clearFilter() {
 
             <Column header="Email Transcript" field="email_transcript" filterField="email_transcript" style="min-width: 12rem">
                 <template #body="{ data }">
-                    <Button v-if="data.email_transcript" label="View" icon="pi pi-external-link" @click="openEmailDialog(data.email_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View email transcript" />
+                    <Button v-if="data.email_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Email', data.email_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View email transcript" />
                     <span v-else>—</span>
                 </template>
 
@@ -577,56 +433,44 @@ function clearFilter() {
             </Column>
         </DataTable>
 
-        <!-- Chat Transcript Dialog -->
+        <!-- Transcript Dialog (chat & email) -->
         <Dialog
-            v-model:visible="chatDialogVisible"
-            :header="`Chat Transcript - ${formatDate(currentChatDate)}`"
+            v-model:visible="dialog.visible"
+            :header="`${dialog.type} Transcript - ${formatDate(dialog.date)}`"
             :style="{ width: '75vw' }"
             maximizable
             modal
             :contentStyle="{ maxHeight: '400px', overflowY: 'auto' }"
-            aria-label="Chat transcript viewer"
+            :aria-label="`${dialog.type} transcript viewer`"
         >
             <div class="space-y-3">
-                <div class="text-xs text-gray-500 dark:text-gray-400 px-4 pt-2 font-semibold tracking-wide">Ticket Date: {{ formatDate(currentChatDate) }}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 px-4 pt-2 font-semibold tracking-wide">Ticket Date: {{ formatDate(dialog.date) }}</div>
                 <div class="whitespace-pre-wrap break-words text-sm p-4 bg-surface-50 dark:bg-surface-900 rounded font-mono">
-                    {{ cleanAndFormatString(currentChatTranscript) }}
+                    {{ cleanAndFormatString(dialog.transcript) }}
                 </div>
             </div>
             <template #footer>
-                <Button label="Close" icon="pi pi-check" @click="chatDialogVisible = false" aria-label="Close chat transcript dialog" />
-            </template>
-        </Dialog>
-
-        <!-- Email Transcript Dialog -->
-        <Dialog
-            v-model:visible="emailDialogVisible"
-            :header="`Email Transcript - ${formatDate(currentEmailDate)}`"
-            :style="{ width: '75vw' }"
-            maximizable
-            modal
-            :contentStyle="{ maxHeight: '400px', overflowY: 'auto' }"
-            aria-label="Email transcript viewer"
-        >
-            <div class="space-y-3">
-                <div class="text-xs text-gray-500 dark:text-gray-400 px-4 pt-2 font-semibold tracking-wide">Ticket Date: {{ formatDate(currentEmailDate) }}</div>
-                <div class="whitespace-pre-wrap break-words text-sm p-4 bg-surface-50 dark:bg-surface-900 rounded font-mono">
-                    {{ cleanAndFormatString(currentEmailTranscript) }}
-                </div>
-            </div>
-            <template #footer>
-                <Button label="Close" icon="pi pi-check" @click="emailDialogVisible = false" aria-label="Close email transcript dialog" />
+                <Button label="Close" icon="pi pi-check" @click="dialog.visible = false" :aria-label="`Close ${dialog.type.toLowerCase()} transcript dialog`" />
             </template>
         </Dialog>
     </div>
 </template>
 
 <style lang="scss">
-:deep(.p-datatable-frozen-tbody) {
+.p-datatable-mask.p-overlay-mask {
+    background-color: var(--p-surface-100) !important;
+    color: var(--text-color);
+}
+
+.app-dark .p-datatable-mask.p-overlay-mask {
+    background-color: var(--p-surface-950) !important;
+}
+
+.p-datatable-frozen-tbody {
     font-weight: 700;
 }
 
-:deep(.p-datatable-scrollable .p-frozen-column) {
+.p-datatable-scrollable .p-frozen-column {
     font-weight: 700;
 }
 
