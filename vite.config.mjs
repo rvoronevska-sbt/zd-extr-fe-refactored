@@ -38,10 +38,7 @@ export default defineConfig({
             enforce: 'pre',
             transform(code, id) {
                 if (!id.includes('primeicons') || !id.endsWith('.css')) return null;
-                return code.replace(
-                    /url\(['"]?\.\/fonts\/(primeicons\.[^'"?)\s]+)[^'")\s]*['"]?\)/g,
-                    "url('/zd-extr-fe/fonts/primeicons/$1')"
-                );
+                return code.replace(/url\(['"]?\.\/fonts\/(primeicons\.[^'"?)\s]+)[^'")\s]*['"]?\)/g, "url('/zd-extr-fe/fonts/primeicons/$1')");
             },
             // Safety net: remove any primeicons font files that still ended up in dist/assets/.
             // Bundle keys use hashed names (e.g. assets/primeicons-C6QP2o4f.woff2) — match accordingly.
