@@ -18,8 +18,8 @@ export function applyTicketFilters(data, params = {}) {
         agent_email = [],
         _chatTagsString = [],
         csat_score = null,
-        csat_reason = null,
         sentiment = null,
+        sentiment_reason = null,
         chat_transcript = null,
         email_transcript = null,
         summary = null,
@@ -34,20 +34,23 @@ export function applyTicketFilters(data, params = {}) {
     if (globalFilter) {
         const searchLower = globalFilter.trim().toLowerCase();
         if (searchLower) {
-            result = result.filter((item) =>
-                String(item.ticketid || '').toLowerCase().includes(searchLower) ||
-                (item.topic || '').toLowerCase().includes(searchLower) ||
-                (item.brand || '').toLowerCase().includes(searchLower) ||
-                (item.vip_level || '').toLowerCase().includes(searchLower) ||
-                (item.customer_email || '').toLowerCase().includes(searchLower) ||
-                (item.agent_email || '').toLowerCase().includes(searchLower) ||
-                (item.csat_score || '').toLowerCase().includes(searchLower) ||
-                (item.csat_reason || '').toLowerCase().includes(searchLower) ||
-                (item.sentiment || '').toLowerCase().includes(searchLower) ||
-                (item.summary || '').toLowerCase().includes(searchLower) ||
-                (item.chat_transcript || '').toLowerCase().includes(searchLower) ||
-                (item.email_transcript || '').toLowerCase().includes(searchLower) ||
-                (item.chat_tags?.some((tag) => tag.toLowerCase().includes(searchLower)) ?? false)
+            result = result.filter(
+                (item) =>
+                    String(item.ticketid || '')
+                        .toLowerCase()
+                        .includes(searchLower) ||
+                    (item.topic || '').toLowerCase().includes(searchLower) ||
+                    (item.brand || '').toLowerCase().includes(searchLower) ||
+                    (item.vip_level || '').toLowerCase().includes(searchLower) ||
+                    (item.customer_email || '').toLowerCase().includes(searchLower) ||
+                    (item.agent_email || '').toLowerCase().includes(searchLower) ||
+                    (item.csat_score || '').toLowerCase().includes(searchLower) ||
+                    (item.sentiment || '').toLowerCase().includes(searchLower) ||
+                    (item.sentiment_reason || '').toLowerCase().includes(searchLower) ||
+                    (item.summary || '').toLowerCase().includes(searchLower) ||
+                    (item.chat_transcript || '').toLowerCase().includes(searchLower) ||
+                    (item.email_transcript || '').toLowerCase().includes(searchLower) ||
+                    (item.chat_tags?.some((tag) => tag.toLowerCase().includes(searchLower)) ?? false)
             );
         }
     }
@@ -79,9 +82,9 @@ export function applyTicketFilters(data, params = {}) {
         result = result.filter((item) => item.topic?.toLowerCase().includes(topicLower));
     }
 
-    if (csat_reason) {
-        const csatReasonLower = csat_reason.toLowerCase();
-        result = result.filter((item) => item.csat_reason?.toLowerCase().includes(csatReasonLower));
+    if (sentiment_reason) {
+        const csatReasonLower = sentiment_reason.toLowerCase();
+        result = result.filter((item) => item.sentiment_reason?.toLowerCase().includes(csatReasonLower));
     }
 
     if (chat_transcript) {

@@ -14,7 +14,7 @@ const isLoading = ref(false);
 const fetchError = ref(null);
 
 // ── Fields that get emptyToNone normalization (short categorical fields) ──
-const NORMALIZE_FIELDS = ['topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', 'csat_reason', 'sentiment'];
+const NORMALIZE_FIELDS = ['topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', 'sentiment', 'sentiment_reason'];
 
 // ── Long-text fields cleaned via normalizeTranscript ──
 const LONG_TEXT_FIELDS = ['summary', 'chat_transcript', 'email_transcript'];

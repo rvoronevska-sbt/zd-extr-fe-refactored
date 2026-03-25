@@ -81,11 +81,11 @@ const createInitialFilters = () => ({
     customer_email: { value: [], matchMode: 'containsAny' },
     agent_email: { value: [], matchMode: 'containsAny' },
     csat_score: { value: null, matchMode: FilterMatchMode.EQUALS },
-    csat_reason: { value: null, matchMode: FilterMatchMode.CONTAINS },
     _chatTagsString: { value: [], matchMode: 'containsAny' },
     chat_transcript: { value: null, matchMode: FilterMatchMode.CONTAINS },
     email_transcript: { value: null, matchMode: FilterMatchMode.CONTAINS },
     sentiment: { value: null, matchMode: FilterMatchMode.EQUALS },
+    sentiment_reason: { value: null, matchMode: FilterMatchMode.CONTAINS },
     summary: { value: null, matchMode: FilterMatchMode.CONTAINS }
 });
 
@@ -124,8 +124,8 @@ const filteredTickets = computed(() =>
         agent_email: filters.value.agent_email?.value ?? [],
         _chatTagsString: filters.value._chatTagsString?.value ?? [],
         csat_score: filters.value.csat_score?.value,
-        csat_reason: filters.value.csat_reason?.value,
         sentiment: filters.value.sentiment?.value,
+        sentiment_reason: filters.value.sentiment_reason?.value,
         chat_transcript: filters.value.chat_transcript?.value,
         email_transcript: filters.value.email_transcript?.value,
         summary: filters.value.summary?.value,
@@ -292,7 +292,7 @@ function clearFilter() {
             :paginatorPosition="'both'"
             v-model:filters="filters"
             filterDisplay="menu"
-            :globalFilterFields="['ticketid', 'topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', 'csat_reason', '_chatTagsString', 'chat_transcript', 'email_transcript', 'sentiment', 'summary']"
+            :globalFilterFields="['ticketid', 'topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', '_chatTagsString', 'chat_transcript', 'email_transcript', 'sentiment', 'sentiment_reason', 'summary']"
             responsiveLayout="scroll"
             showGridlines
             @page="onPage"
@@ -410,15 +410,6 @@ function clearFilter() {
                 </template>
             </Column>
 
-            <Column header="CSAT Reason" field="csat_reason" filterField="csat_reason" style="min-width: 12rem">
-                <template #body="{ data }">
-                    {{ data.csat_reason }}
-                </template>
-                <template #filter="{ filterModel }">
-                    <InputText v-model="filterModel.value" type="text" placeholder="Filter by CSAT Reason" />
-                </template>
-            </Column>
-
             <Column header="Chat Tags" filterField="_chatTagsString" :showFilterMatchModes="false" style="min-width: 30rem">
                 <template #body="{ data }">
                     <div class="flex flex-wrap gap-1">
@@ -445,7 +436,7 @@ function clearFilter() {
                 </template>
             </Column>
 
-            <Column header="Email Transcript" field="email_transcript" filterField="email_transcript" style="min-width: 12rem">
+            <Column header="Email Transcript" field="email_transcript" filterField="email_transcript" style="min-width: 13rem">
                 <template #body="{ data }">
                     <Button v-if="data.email_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Email', data.email_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View email transcript" />
                     <span v-else>—</span>
@@ -466,6 +457,15 @@ function clearFilter() {
                             <Tag :value="slotProps.option" />
                         </template>
                     </Select>
+                </template>
+            </Column>
+
+            <Column header="Sentiment Reason" field="sentiment_reason" filterField="sentiment_reason" style="min-width: 14rem">
+                <template #body="{ data }">
+                    {{ data.sentiment_reason }}
+                </template>
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" type="text" placeholder="Filter by Sentiment Reason" />
                 </template>
             </Column>
 
