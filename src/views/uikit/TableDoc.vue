@@ -185,7 +185,15 @@ function loadTicketsLazy(event) {
 //    Debounced to avoid thrashing on rapid keystroke filter input.
 const syncFilteredData = debounce((filtered) => {
     tableStore.setFilteredTickets(filtered);
-    virtualTickets.value = new Array(filtered.length).fill(null);
+
+    // Reset virtual array and eagerly fill the first visible chunk
+    // so rows are never empty after a filter change or clear
+    const arr = new Array(filtered.length).fill(null);
+    const initialChunk = Math.min(filtered.length, VIRTUAL_NUM_TOLERATED * 3);
+    for (let i = 0; i < initialChunk; i++) {
+        arr[i] = filtered[i];
+    }
+    virtualTickets.value = arr;
 }, FILTER_DEBOUNCE_MS);
 
 watch(filteredTickets, (newFiltered) => syncFilteredData(newFiltered), { immediate: true });
@@ -257,7 +265,6 @@ function clearFilter() {
     filters.value.timestamp.constraints[0].value = null;
     filters.value.timestamp.constraints[1].value = null;
     activeQuickFilter.value = null;
-    virtualTickets.value = new Array(filteredTickets.value.length).fill(null);
 }
 </script>
 
