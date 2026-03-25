@@ -10,11 +10,9 @@ const ChartDoc = defineAsyncComponent(() => import('./uikit/ChartDoc.vue'));
 <template>
     <AppTopbar />
 
-    <main class="pt-8 px-8">
+    <main class="pt-8 pb-8 px-8">
         <Dashboard />
-        <div class="pt-2 my-8">
-            <ChartDoc />
-        </div>
+        <ChartDoc />
     </main>
 
     <AppFooter />

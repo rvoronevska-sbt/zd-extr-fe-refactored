@@ -33,16 +33,39 @@ function processTicket(ticket) {
     const tags = toArray(ticket.chat_tags).filter((t) => typeof t === 'string' && t.trim());
     const normalized = Object.fromEntries(NORMALIZE_FIELDS.map((field) => [field, emptyToNone(ticket[field])]));
     const longText = Object.fromEntries(LONG_TEXT_FIELDS.map((field) => [field, normalizeTranscript(ticket[field])]));
-    return {
+    const chatTagsString = tags
+        .map((t) => t.trim().toLowerCase())
+        .sort()
+        .join(', ');
+
+    const processed = {
         ...ticket,
         ...normalized,
         ...longText,
         timestamp: new Date(ticket.timestamp),
-        _chatTagsString: tags
-            .map((t) => t.trim().toLowerCase())
-            .sort()
-            .join(', ')
+        _chatTagsString: chatTagsString
     };
+
+    // Pre-computed lowercase search index — avoids 13× toLowerCase per row during global filter
+    processed._searchIndex = [
+        String(processed.ticketid || ''),
+        processed.topic || '',
+        processed.brand || '',
+        processed.vip_level || '',
+        processed.customer_email || '',
+        processed.agent_email || '',
+        processed.csat_score || '',
+        processed.sentiment || '',
+        processed.sentiment_reason || '',
+        processed.summary || '',
+        processed.chat_transcript || '',
+        processed.email_transcript || '',
+        chatTagsString
+    ]
+        .join('\0')
+        .toLowerCase();
+
+    return processed;
 }
 
 // ── Yield to the browser event loop between processing batches ──

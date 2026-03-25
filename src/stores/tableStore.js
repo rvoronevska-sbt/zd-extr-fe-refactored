@@ -2,6 +2,9 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { NEGATIVE_SENTIMENTS } from '@/config/enums';
 
+// O(1) lookup instead of Array.includes O(n) — called per row
+const NEGATIVE_SET = new Set(NEGATIVE_SENTIMENTS);
+
 export const useTableStore = defineStore('table', () => {
     const filteredTickets = ref([]);
 
@@ -16,17 +19,14 @@ export const useTableStore = defineStore('table', () => {
         const stats = {};
 
         filteredTickets.value.forEach((c) => {
-            const topic = c.topic?.trim() || 'Unknown';
+            const topic = c.topic || 'Unknown';
             if (!stats[topic]) {
-                stats[topic] = {
-                    total: 0,
-                    negative: 0
-                };
+                stats[topic] = { total: 0, negative: 0 };
             }
             stats[topic].total++;
 
-            const isNegative = NEGATIVE_SENTIMENTS.includes(c.sentiment?.toLowerCase());
-            if (isNegative) {
+            // Data is already trimmed by emptyToNone; sentiment values match NEGATIVE_SENTIMENTS case
+            if (NEGATIVE_SET.has(c.sentiment?.toLowerCase())) {
                 stats[topic].negative++;
             }
         });

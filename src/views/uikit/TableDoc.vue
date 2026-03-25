@@ -23,9 +23,10 @@ const maskEmail = (email) => {
     return '*'.repeat(email.length);
 };
 
-const PAGE_SIZE_DEFAULT = 5;
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
-const FILTER_DEBOUNCE_MS = 500;
+const FILTER_DEBOUNCE_MS = 300;
+const VIRTUAL_ITEM_SIZE = 44;
+const VIRTUAL_SCROLL_DELAY = 200;
+const VIRTUAL_NUM_TOLERATED = 10;
 
 const tableStore = useTableStore();
 
@@ -91,11 +92,10 @@ const createInitialFilters = () => ({
 
 const filters = ref(createInitialFilters());
 
-// Pagination state
-const lazyParams = ref({
-    page: 1,
-    limit: PAGE_SIZE_DEFAULT
-});
+// Virtual scroll state
+const virtualTickets = ref([]);
+const lazyLoading = ref(false);
+const loadLazyTimeout = ref();
 
 // Quick date filter active state
 const activeQuickFilter = ref('today');
@@ -111,10 +111,10 @@ const openDialog = (type, transcript, timestamp) => {
 };
 
 // ────────────────────────────────────────────────
-// Filtered & paginated data (computed – full dataset filtering)
+// Filtered data (computed – full dataset filtering)
 // ────────────────────────────────────────────────
 const filteredTickets = computed(() =>
-    applyTicketFilters([...fullProcessedTickets.value], {
+    applyTicketFilters(fullProcessedTickets.value, {
         globalFilter: filters.value.global?.value || '',
         ticketid: filters.value.ticketid?.value,
         brand: filters.value.brand?.value ?? [],
@@ -139,38 +139,56 @@ const filteredTickets = computed(() =>
 // ────────────────────────────────────────────────
 const { availableBrands, availableVipLevels, availableCustomerEmails, availableAgentEmails, availableChatTags, availableSentiments, availableCsatScores } = useFacetedFilterOptions(filters, fullProcessedTickets);
 
-const paginatedTickets = computed(() => {
-    const start = (lazyParams.value.page - 1) * lazyParams.value.limit;
-    return filteredTickets.value.slice(start, start + lazyParams.value.limit);
+const totalRecords = computed(() => filteredTickets.value.length);
+
+const TABLE_HEIGHT_ON_LOADING = 100; // Min height to show skeleton loaders when data is empty/loading
+const TABLE_FILTERS_PRIMARY_HEIGHT = 55; // Height of the primary filter row (for scroll calculations)
+const TABLE_FILTERS_SECONDARY_HEIGHT = 58; // Height of the secondary filter row (for scroll calculations)
+const VIRTUAL_ITEM_HEIGHT = 85; // Estimated pixel height of each row item (for scroll calculations)
+const TABLE_MAX_HEIGHT = 500;
+
+const dynamicScrollHeight = computed(() => {
+    const contentHeight = TABLE_FILTERS_PRIMARY_HEIGHT + TABLE_FILTERS_SECONDARY_HEIGHT + totalRecords.value * VIRTUAL_ITEM_HEIGHT;
+    const dynamicHeight = contentHeight < TABLE_MAX_HEIGHT ? `${contentHeight}px` : `${TABLE_MAX_HEIGHT}px`;
+    return isLoading.value ? `${TABLE_HEIGHT_ON_LOADING}px` : dynamicHeight;
 });
 
-const totalRecords = computed(() => filteredTickets.value.length);
+/**
+ * Populate virtualTickets on scroll — mimics lazy-loading from a remote source.
+ * Called by PrimeVue's virtual scroller whenever new rows enter the viewport.
+ */
+function loadTicketsLazy(event) {
+    !lazyLoading.value && (lazyLoading.value = true);
+
+    if (loadLazyTimeout.value) {
+        clearTimeout(loadLazyTimeout.value);
+    }
+
+    loadLazyTimeout.value = setTimeout(() => {
+        const { first, last } = event;
+        const loadedChunk = filteredTickets.value.slice(first, last);
+        const _virtual = [...virtualTickets.value];
+
+        Array.prototype.splice.apply(_virtual, [first, last - first, ...loadedChunk]);
+
+        virtualTickets.value = _virtual;
+        lazyLoading.value = false;
+    }, VIRTUAL_SCROLL_DELAY);
+}
 
 // ────────────────────────────────────────────────
 // Watchers
 // ────────────────────────────────────────────────
 
-// 1. Debounced page reset when filters change (increased to 500ms for better UX)
-const debouncedResetPage = debounce(() => {
-    lazyParams.value.page = 1;
+// Sync full filtered data to Pinia store (for VipTable & Charts)
+//    and reset the virtual array so the scroller knows the new length.
+//    Debounced to avoid thrashing on rapid keystroke filter input.
+const syncFilteredData = debounce((filtered) => {
+    tableStore.setFilteredTickets(filtered);
+    virtualTickets.value = new Array(filtered.length).fill(null);
 }, FILTER_DEBOUNCE_MS);
 
-// Deep watch on all filters – reset page on any change
-// Note: Deep watching is necessary here since filters contain nested objects
-watch(
-    () => filters.value,
-    () => debouncedResetPage(),
-    { deep: true }
-);
-
-// 2. Sync full filtered data to Pinia store (for VipTable & Charts)
-watch(
-    filteredTickets,
-    (newFiltered) => {
-        tableStore.setFilteredTickets(newFiltered);
-    },
-    { immediate: true }
-);
+watch(filteredTickets, (newFiltered) => syncFilteredData(newFiltered), { immediate: true });
 
 // ────────────────────────────────────────────────
 // Export & format
@@ -181,25 +199,9 @@ const { exportToCSV } = useCSVExport(dataTable, filteredTickets, formatDate);
 // Event handlers
 // ────────────────────────────────────────────────
 
-/**
- * Handle pagination changes from DataTable.
- * @param {Object} event - Pagination event with page and rows info
- */
-function onPage(event) {
-    if (lazyParams.value) {
-        lazyParams.value.page = event?.page ? event.page + 1 : 1;
-        lazyParams.value.limit = event?.rows || 5;
-    }
-}
-
-/**
- * Handle filter changes - reset pagination to page 1.
- */
-function onFilter() {
-    if (lazyParams.value) {
-        lazyParams.value.page = 1;
-    }
-}
+// Debounced wrapper for MultiSelect @change — prevents 5× recompute when
+// selecting 5 items in rapid succession (each selection triggers filterCallback)
+const debouncedFilterCallback = debounce((cb) => cb(), FILTER_DEBOUNCE_MS);
 
 /**
  * Apply quick date filter presets (Today, Last 7 Days, Last 30 Days).
@@ -233,10 +235,6 @@ const setQuickDateFilter = (period) => {
         filters.value.timestamp.constraints[0].value = start;
         filters.value.timestamp.constraints[1].value = end;
     }
-
-    if (lazyParams.value) {
-        lazyParams.value.page = 1;
-    }
 };
 
 const fromDate = computed({
@@ -259,44 +257,32 @@ function clearFilter() {
     filters.value.timestamp.constraints[0].value = null;
     filters.value.timestamp.constraints[1].value = null;
     activeQuickFilter.value = null;
-    lazyParams.value.page = 1;
-    lazyParams.value.limit = PAGE_SIZE_DEFAULT;
+    virtualTickets.value = new Array(filteredTickets.value.length).fill(null);
 }
 </script>
 
 <template>
-    <div class="data-table card mt-8">
+    <div class="data-table card mt-8 mb-8">
         <!-- Info card -->
-        <div class="dt-info-card card mb-8 p-4">
-            <p class="inline-block dt-info-p rounded-xl py-2 px-3" v-if="paginatedTickets.length > 0">
-                Showing <strong>{{ paginatedTickets.length }}</strong> tickets on page {{ lazyParams.page }} (total: <strong>{{ totalRecords }}</strong
-                >).
+        <div class="dt-info-card card mb-8 p-4!">
+            <p class="inline-block dt-info-p rounded-xl py-2 px-3 m-0!" v-if="totalRecords > 0">
+                Showing <strong>{{ totalRecords }}</strong> filtered tickets.
             </p>
-            <p class="inline-block dt-info-p rounded-xl py-2 px-3" v-else>No tickets found on this page.</p>
-            <p>Tip: Use filters to narrow results. Export includes current filtered page only.</p>
+            <p class="inline-block dt-info-p rounded-xl py-2 px-3 m-0!" v-else>No tickets found.</p>
+            <p class="inline-block p-tag-info rounded-xl py-2 px-3 mb-0! ml-2!" v-if="totalRecords > 0">Tip: Use filters to narrow results. Export includes all filtered results.</p>
         </div>
-
-        <div class="font-semibold text-xl mb-4">Filtering & Pagination</div>
 
         <DataTable
             ref="dataTable"
-            :value="paginatedTickets"
-            :lazy="true"
-            :totalRecords="totalRecords"
-            :rows="lazyParams.limit"
+            :value="virtualTickets"
             :loading="isLoading"
-            paginator
-            :rowsPerPageOptions="PAGE_SIZE_OPTIONS"
-            paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport RowsPerPageDropdown"
-            currentPageReportTemplate="Showing {first} to {last} of {totalRecords}"
-            :paginatorPosition="'both'"
+            scrollable
+            :scrollHeight="dynamicScrollHeight"
+            :virtualScrollerOptions="{ lazy: true, onLazyLoad: loadTicketsLazy, itemSize: VIRTUAL_ITEM_SIZE, delay: VIRTUAL_SCROLL_DELAY, showLoader: true, loading: lazyLoading, numToleratedItems: VIRTUAL_NUM_TOLERATED }"
             v-model:filters="filters"
             filterDisplay="menu"
             :globalFilterFields="['ticketid', 'topic', 'brand', 'vip_level', 'customer_email', 'agent_email', 'csat_score', '_chatTagsString', 'chat_transcript', 'email_transcript', 'sentiment', 'sentiment_reason', 'summary']"
-            responsiveLayout="scroll"
             showGridlines
-            @page="onPage"
-            @filter="onFilter"
         >
             <!-- Header with quick filters, clear, export, global search -->
             <template #header>
@@ -325,9 +311,9 @@ function clearFilter() {
             <template #empty>No tickets found.</template>
             <template #loading>Loading tickets... Please wait.</template>
 
-            <Column header="Date" filterField="timestamp" dataType="date" filterMenuClass="my-date-filter-menu" style="min-width: 10rem">
+            <Column header="Date" filterField="timestamp" dataType="date" filterMenuClass="my-date-filter-menu" style="min-width: 10rem; height: 44px">
                 <template #body="{ data }">
-                    {{ formatDate(data.timestamp) }}
+                    <template v-if="data">{{ formatDate(data.timestamp) }}</template>
                 </template>
                 <template #filter="{ filterModel }">
                     <div class="flex flex-col sm:flex-row gap-2 p-2">
@@ -335,71 +321,106 @@ function clearFilter() {
                         <DatePicker v-model="toDate" placeholder="To (<)" dateFormat="mm/dd/yy" showIcon />
                     </div>
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="60%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Topic" filterField="topic" style="min-width: 15rem">
+            <Column header="Topic" filterField="topic" style="min-width: 15rem; height: 44px">
                 <template #body="{ data }">
-                    <div class="flex flex-wrap gap-1">
+                    <div v-if="data" class="flex flex-wrap gap-1">
                         <Tag :value="data.topic" severity="warn" />
                     </div>
                 </template>
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Topic" />
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="70%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Ticket ID" field="ticketid" filterField="ticketid" style="min-width: 10rem">
+            <Column header="Ticket ID" field="ticketid" filterField="ticketid" style="min-width: 10rem; height: 44px">
                 <template #body="{ data }">
-                    {{ data.ticketid }}
+                    <template v-if="data">{{ data.ticketid }}</template>
                 </template>
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Ticket ID" />
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="50%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Brand" filterField="brand" :showFilterMatchModes="false" style="min-width: 10rem">
+            <Column header="Brand" filterField="brand" :showFilterMatchModes="false" style="min-width: 10rem; height: 44px">
                 <template #body="{ data }">
-                    <div class="flex flex-wrap gap-1">
+                    <div v-if="data" class="flex flex-wrap gap-1">
                         <Tag :value="data.brand" />
                     </div>
                 </template>
                 <template #filter="{ filterModel, filterCallback }">
-                    <MultiSelect v-model="filterModel.value" :options="availableBrands" placeholder="Any Brand" display="chip" :filter="true" showClear @change="filterCallback()" />
+                    <MultiSelect v-model="filterModel.value" :options="availableBrands" placeholder="Any Brand" display="chip" :filter="true" showClear @change="debouncedFilterCallback(filterCallback)" />
+                </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="40%" height="1rem" />
+                    </div>
                 </template>
             </Column>
 
-            <Column header="VIP Level" filterField="vip_level" :showFilterMatchModes="false" style="min-width: 12rem">
+            <Column header="VIP Level" filterField="vip_level" :showFilterMatchModes="false" style="min-width: 12rem; height: 44px">
                 <template #body="{ data }">
-                    <div class="flex flex-wrap gap-1">
+                    <div v-if="data" class="flex flex-wrap gap-1">
                         <Tag :value="data.vip_level" severity="info" />
                     </div>
                 </template>
                 <template #filter="{ filterModel, filterCallback }">
-                    <MultiSelect v-model="filterModel.value" :options="availableVipLevels" placeholder="Any VIP Level" display="chip" :filter="true" showClear @change="filterCallback()" />
+                    <MultiSelect v-model="filterModel.value" :options="availableVipLevels" placeholder="Any VIP Level" display="chip" :filter="true" showClear @change="debouncedFilterCallback(filterCallback)" />
+                </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="50%" height="1rem" />
+                    </div>
                 </template>
             </Column>
 
-            <Column header="Customer Email" filterField="customer_email" :showFilterMatchModes="false" style="min-width: 18rem">
+            <Column header="Customer Email" filterField="customer_email" :showFilterMatchModes="false" style="min-width: 18rem; height: 44px">
                 <template #body="{ data }">
-                    {{ isAdmin ? data.customer_email || '-' : maskEmail(data.customer_email) }}
+                    <template v-if="data">{{ isAdmin ? data.customer_email || '-' : maskEmail(data.customer_email) }}</template>
                 </template>
                 <template #filter="{ filterModel, filterCallback }">
-                    <MultiSelect v-model="filterModel.value" :options="availableCustomerEmails" placeholder="Any Customer Email" display="chip" :filter="true" showClear @change="filterCallback()" />
+                    <MultiSelect v-model="filterModel.value" :options="availableCustomerEmails" placeholder="Any Customer Email" display="chip" :filter="true" showClear @change="debouncedFilterCallback(filterCallback)" />
+                </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="60%" height="1rem" />
+                    </div>
                 </template>
             </Column>
 
-            <Column header="Agent Email" filterField="agent_email" :showFilterMatchModes="false" style="min-width: 18rem">
+            <Column header="Agent Email" filterField="agent_email" :showFilterMatchModes="false" style="min-width: 18rem; height: 44px">
                 <template #body="{ data }">
-                    {{ data.agent_email || '-' }}
+                    <template v-if="data">{{ data.agent_email || '-' }}</template>
                 </template>
                 <template #filter="{ filterModel, filterCallback }">
-                    <MultiSelect v-model="filterModel.value" :options="availableAgentEmails" placeholder="Any Agent Email" display="chip" :filter="true" showClear @change="filterCallback()" />
+                    <MultiSelect v-model="filterModel.value" :options="availableAgentEmails" placeholder="Any Agent Email" display="chip" :filter="true" showClear @change="debouncedFilterCallback(filterCallback)" />
+                </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="60%" height="1rem" />
+                    </div>
                 </template>
             </Column>
 
-            <Column header="CSAT Score" field="csat_score" filterField="csat_score" style="min-width: 4rem">
+            <Column header="CSAT Score" field="csat_score" filterField="csat_score" style="min-width: 12rem; height: 44px">
                 <template #body="{ data }">
-                    <Tag :value="data.csat_score" severity="contrast" />
+                    <Tag v-if="data" :value="data.csat_score" severity="contrast" />
                 </template>
                 <template #filter="{ filterModel }">
                     <Select v-model="filterModel.value" :options="availableCsatScores" placeholder="Filter by CSAT Score" showClear>
@@ -408,48 +429,70 @@ function clearFilter() {
                         </template>
                     </Select>
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="30%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Chat Tags" filterField="_chatTagsString" :showFilterMatchModes="false" style="min-width: 30rem">
+            <Column header="Chat Tags" filterField="_chatTagsString" :showFilterMatchModes="false" style="min-width: 30rem; height: 44px">
                 <template #body="{ data }">
-                    <div class="flex flex-wrap gap-1">
+                    <div v-if="data" class="flex flex-wrap gap-1">
                         <Tag v-for="tag in data.chat_tags" :key="tag" :value="tag" severity="secondary" />
                     </div>
                 </template>
                 <template #filter="{ filterModel, filterCallback }">
-                    <MultiSelect v-model="filterModel.value" :options="availableChatTags" placeholder="Filter by Chat Tags" display="chip" :filter="true" showClear @change="filterCallback()">
+                    <MultiSelect v-model="filterModel.value" :options="availableChatTags" placeholder="Filter by Chat Tags" display="chip" :filter="true" showClear @change="debouncedFilterCallback(filterCallback)">
                         <template #option="slotProps">
                             <Tag :value="slotProps.option" />
                         </template>
                     </MultiSelect>
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="80%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Chat Transcript" field="chat_transcript" filterField="chat_transcript" style="min-width: 12rem">
+            <Column header="Chat Transcript" field="chat_transcript" filterField="chat_transcript" style="min-width: 12rem; height: 44px">
                 <template #body="{ data }">
-                    <Button v-if="data.chat_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Chat', data.chat_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View chat transcript" />
-                    <span v-else>—</span>
+                    <template v-if="data">
+                        <Button v-if="data.chat_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Chat', data.chat_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View chat transcript" />
+                        <span v-else>—</span>
+                    </template>
                 </template>
-
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Chat Transcript" />
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="40%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Email Transcript" field="email_transcript" filterField="email_transcript" style="min-width: 13rem">
+            <Column header="Email Transcript" field="email_transcript" filterField="email_transcript" style="min-width: 13rem; height: 44px">
                 <template #body="{ data }">
-                    <Button v-if="data.email_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Email', data.email_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View email transcript" />
-                    <span v-else>—</span>
+                    <template v-if="data">
+                        <Button v-if="data.email_transcript" label="View" icon="pi pi-external-link" @click="openDialog('Email', data.email_transcript, data.timestamp)" size="small" severity="info" rounded aria-label="View email transcript" />
+                        <span v-else>—</span>
+                    </template>
                 </template>
-
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Email Transcript" />
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="40%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Sentiment" field="sentiment" filterField="sentiment" style="min-width: 4rem">
+            <Column header="Sentiment" field="sentiment" filterField="sentiment" style="min-width: 4rem; height: 44px">
                 <template #body="{ data }">
-                    <Tag :value="data.sentiment" severity="help" />
+                    <Tag v-if="data" :value="data.sentiment" severity="help" />
                 </template>
                 <template #filter="{ filterModel }">
                     <Select v-model="filterModel.value" :options="availableSentiments" placeholder="Filter by Sentiment" showClear>
@@ -458,23 +501,38 @@ function clearFilter() {
                         </template>
                     </Select>
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="40%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Sentiment Reason" field="sentiment_reason" filterField="sentiment_reason" style="min-width: 14rem">
+            <Column header="Sentiment Reason" field="sentiment_reason" filterField="sentiment_reason" style="min-width: 14rem; height: 44px">
                 <template #body="{ data }">
-                    {{ data.sentiment_reason }}
+                    <template v-if="data">{{ data.sentiment_reason }}</template>
                 </template>
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Sentiment Reason" />
                 </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="70%" height="1rem" />
+                    </div>
+                </template>
             </Column>
 
-            <Column header="Summary" field="summary" filterField="summary" style="min-width: 25rem">
+            <Column header="Summary" field="summary" filterField="summary" style="min-width: 45rem; height: 44px">
                 <template #body="{ data }">
-                    {{ data.summary }}
+                    <template v-if="data">{{ data.summary }}</template>
                 </template>
                 <template #filter="{ filterModel }">
                     <InputText v-model="filterModel.value" type="text" placeholder="Filter by Summary" />
+                </template>
+                <template #loading>
+                    <div class="flex items-center" style="height: 17px; flex-grow: 1; overflow: hidden">
+                        <Skeleton width="90%" height="1rem" />
+                    </div>
                 </template>
             </Column>
         </DataTable>

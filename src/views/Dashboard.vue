@@ -11,7 +11,7 @@ const VipTableDoc = defineAsyncComponent(() => import('./uikit/VipTableDoc.vue')
 
 <template>
     <!-- Info card -->
-    <div class="dt-info-card card mt-16 mb-8 p-4">
+    <div class="dt-info-card card mt-16 mb-8 p-4!">
         <p class="inline-block dt-info-p rounded-xl py-2 px-3">
             <span v-if="authStore.user?.displayName" class="text-surface-700 dark:text-surface-200 font-medium text-sm"> Welcome, {{ authStore.user.displayName }}! </span>
         </p>

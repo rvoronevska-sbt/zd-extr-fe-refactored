@@ -57,7 +57,7 @@ function setChartOptions() {
 </script>
 
 <template>
-    <div class="card" v-if="hasChartData">
+    <div class="card pt-2 my-8" v-if="hasChartData">
         <h2 class="font-semibold text-xl mb-6">
             Bar Chart – Topics Distribution
             <span v-if="totalTopicCount > 100" class="text-sm font-normal text-color-secondary ml-2">(top 100 of {{ totalTopicCount }} topics)</span>

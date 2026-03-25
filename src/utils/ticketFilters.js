@@ -29,29 +29,12 @@ export function applyTicketFilters(data, params = {}) {
 
     let result = data;
 
-    // Global search — covers all text fields and chat tags
-    // Uses short-circuit || chain instead of array allocation (avoids 360k+ allocations on 30k dataset)
+    // Global search — uses pre-computed _searchIndex (single lowercase string per row)
+    // to avoid 13× toLowerCase calls per row on every keystroke
     if (globalFilter) {
         const searchLower = globalFilter.trim().toLowerCase();
         if (searchLower) {
-            result = result.filter(
-                (item) =>
-                    String(item.ticketid || '')
-                        .toLowerCase()
-                        .includes(searchLower) ||
-                    (item.topic || '').toLowerCase().includes(searchLower) ||
-                    (item.brand || '').toLowerCase().includes(searchLower) ||
-                    (item.vip_level || '').toLowerCase().includes(searchLower) ||
-                    (item.customer_email || '').toLowerCase().includes(searchLower) ||
-                    (item.agent_email || '').toLowerCase().includes(searchLower) ||
-                    (item.csat_score || '').toLowerCase().includes(searchLower) ||
-                    (item.sentiment || '').toLowerCase().includes(searchLower) ||
-                    (item.sentiment_reason || '').toLowerCase().includes(searchLower) ||
-                    (item.summary || '').toLowerCase().includes(searchLower) ||
-                    (item.chat_transcript || '').toLowerCase().includes(searchLower) ||
-                    (item.email_transcript || '').toLowerCase().includes(searchLower) ||
-                    (item.chat_tags?.some((tag) => tag.toLowerCase().includes(searchLower)) ?? false)
-            );
+            result = result.filter((item) => item._searchIndex.includes(searchLower));
         }
     }
 
@@ -64,8 +47,20 @@ export function applyTicketFilters(data, params = {}) {
     // Multi-select filters
     if (brand.length) result = result.filter((item) => brand.includes(item.brand));
     if (vip_level.length) result = result.filter((item) => vip_level.includes(item.vip_level));
-    if (customer_email.length) result = result.filter((item) => customer_email.some((e) => item.customer_email?.toLowerCase().includes(e.toLowerCase())));
-    if (agent_email.length) result = result.filter((item) => agent_email.some((e) => item.agent_email?.toLowerCase().includes(e.toLowerCase())));
+    if (customer_email.length) {
+        const lowerEmails = customer_email.map((e) => e.toLowerCase());
+        result = result.filter((item) => {
+            const val = item.customer_email?.toLowerCase();
+            return val && lowerEmails.some((e) => val.includes(e));
+        });
+    }
+    if (agent_email.length) {
+        const lowerEmails = agent_email.map((e) => e.toLowerCase());
+        result = result.filter((item) => {
+            const val = item.agent_email?.toLowerCase();
+            return val && lowerEmails.some((e) => val.includes(e));
+        });
+    }
     if (_chatTagsString.length) result = result.filter((item) => _chatTagsString.some((tag) => item.chat_tags?.includes(tag)));
 
     // Single-value exact filters
@@ -102,14 +97,14 @@ export function applyTicketFilters(data, params = {}) {
         result = result.filter((item) => item.summary?.toLowerCase().includes(lower));
     }
 
-    // Date range — works for both Date objects and ISO strings
+    // Date range — item.timestamp is already a Date object from processTicket
     if (startDate) {
-        const start = new Date(startDate);
-        result = result.filter((item) => new Date(item.timestamp) >= start);
+        const startMs = new Date(startDate).getTime();
+        result = result.filter((item) => item.timestamp.getTime() >= startMs);
     }
     if (endDate) {
-        const end = new Date(endDate);
-        result = result.filter((item) => new Date(item.timestamp) < end);
+        const endMs = new Date(endDate).getTime();
+        result = result.filter((item) => item.timestamp.getTime() < endMs);
     }
 
     return result;

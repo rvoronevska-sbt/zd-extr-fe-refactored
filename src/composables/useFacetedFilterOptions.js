@@ -3,11 +3,12 @@ import { applyTicketFilters } from '@/utils/ticketFilters';
 
 /**
  * Derives faceted multiselect options from the full ticket dataset.
- * Each available* computed applies all active filters EXCEPT its own field,
+ * Each available* ref applies all active filters EXCEPT its own field,
  * so the dropdown only shows values that exist in the currently narrowed data.
  *
- * Performance: base-filtered dataset is computed once, then each facet
- * only applies the other multiselects (not the full filter pipeline again).
+ * Performance: base-filtered dataset is computed once, then a SINGLE-PASS
+ * bitmask loop collects all 7 facet sets simultaneously — replaces the
+ * previous 7× applyTicketFilters calls with one O(n) iteration.
  *
  * @param {Ref<Object>} filters  - The filters ref from TableDoc
  * @param {Ref<Array>}  tickets  - fullProcessedTickets from useTicketData
@@ -40,21 +41,83 @@ export function useFacetedFilterOptions(filters, tickets) {
     // Step 1: Apply base (non-multiselect) filters once — shared by all facets
     const baseFiltered = computed(() => applyTicketFilters(tickets.value, baseFilterParams.value));
 
-    // Step 2: For each facet, apply only the OTHER multiselects, then extract unique values
-    function facetedOptions(excludeField, extractFn, clearValue = []) {
-        const multiselectParams = { ...activeMultiselects.value, [excludeField]: clearValue };
-        const subset = applyTicketFilters(baseFiltered.value, multiselectParams);
-        const values = subset.flatMap(extractFn).filter(Boolean);
-        return [...new Set(values)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    }
+    // Step 2: Single-pass bitmask aggregation — replaces 7 separate filter passes
+    //
+    // Bit positions: brand=1, vip_level=2, customer_email=4, agent_email=8, _chatTagsString=16
+    // ALL_PASS = 0b11111 = 31
+    //
+    // For each row, compute which multiselect filters it passes (bitmask).
+    // A row's value belongs in facet X's dropdown if the row passes all
+    // OTHER multiselects — i.e. (mask | bitForX) === ALL_PASS.
+    const ALL_PASS = 31;
 
-    const availableBrands = computed(() => facetedOptions('brand', (t) => [t.brand]));
-    const availableVipLevels = computed(() => facetedOptions('vip_level', (t) => [t.vip_level]));
-    const availableCustomerEmails = computed(() => facetedOptions('customer_email', (t) => [t.customer_email]));
-    const availableAgentEmails = computed(() => facetedOptions('agent_email', (t) => [t.agent_email]));
-    const availableChatTags = computed(() => facetedOptions('_chatTagsString', (t) => t.chat_tags ?? []));
-    const availableSentiments = computed(() => facetedOptions('sentiment', (t) => [t.sentiment], null));
-    const availableCsatScores = computed(() => facetedOptions('csat_score', (t) => [t.csat_score], null));
+    const facetedResult = computed(() => {
+        const data = baseFiltered.value;
+        const ms = activeMultiselects.value;
+
+        // Pre-compute filter lookup structures (once, outside the loop)
+        const brandSet = ms.brand.length ? new Set(ms.brand) : null;
+        const vipSet = ms.vip_level.length ? new Set(ms.vip_level) : null;
+        const custEmailLower = ms.customer_email.length ? ms.customer_email.map((e) => e.toLowerCase()) : null;
+        const agentEmailLower = ms.agent_email.length ? ms.agent_email.map((e) => e.toLowerCase()) : null;
+        const tagsSet = ms._chatTagsString.length ? new Set(ms._chatTagsString) : null;
+
+        const brands = new Set();
+        const vipLevels = new Set();
+        const customerEmails = new Set();
+        const agentEmails = new Set();
+        const chatTags = new Set();
+        const sentiments = new Set();
+        const csatScores = new Set();
+
+        for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            let mask = 0;
+
+            // Test each multiselect filter for this row
+            if (!brandSet || brandSet.has(row.brand)) mask |= 1;
+            if (!vipSet || vipSet.has(row.vip_level)) mask |= 2;
+            if (!custEmailLower || (row.customer_email && custEmailLower.some((e) => row.customer_email.toLowerCase().includes(e)))) mask |= 4;
+            if (!agentEmailLower || (row.agent_email && agentEmailLower.some((e) => row.agent_email.toLowerCase().includes(e)))) mask |= 8;
+            if (!tagsSet || row.chat_tags?.some((t) => tagsSet.has(t))) mask |= 16;
+
+            // Collect facet values — row qualifies for facet X if all OTHER filters pass
+            if ((mask | 1) === ALL_PASS && row.brand) brands.add(row.brand);
+            if ((mask | 2) === ALL_PASS && row.vip_level) vipLevels.add(row.vip_level);
+            if ((mask | 4) === ALL_PASS && row.customer_email) customerEmails.add(row.customer_email);
+            if ((mask | 8) === ALL_PASS && row.agent_email) agentEmails.add(row.agent_email);
+            if ((mask | 16) === ALL_PASS && row.chat_tags) {
+                for (const tag of row.chat_tags) chatTags.add(tag);
+            }
+
+            // Sentiment & CSAT: not cross-filtered — need all multiselects to pass
+            if (mask === ALL_PASS) {
+                if (row.sentiment) sentiments.add(row.sentiment);
+                if (row.csat_score) csatScores.add(row.csat_score);
+            }
+        }
+
+        const sortFn = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+
+        return {
+            brands: [...brands].sort(sortFn),
+            vipLevels: [...vipLevels].sort(sortFn),
+            customerEmails: [...customerEmails].sort(sortFn),
+            agentEmails: [...agentEmails].sort(sortFn),
+            chatTags: [...chatTags].sort(sortFn),
+            sentiments: [...sentiments].sort(sortFn),
+            csatScores: [...csatScores].sort(sortFn)
+        };
+    });
+
+    // Thin computed wrappers — read from the single cached result
+    const availableBrands = computed(() => facetedResult.value.brands);
+    const availableVipLevels = computed(() => facetedResult.value.vipLevels);
+    const availableCustomerEmails = computed(() => facetedResult.value.customerEmails);
+    const availableAgentEmails = computed(() => facetedResult.value.agentEmails);
+    const availableChatTags = computed(() => facetedResult.value.chatTags);
+    const availableSentiments = computed(() => facetedResult.value.sentiments);
+    const availableCsatScores = computed(() => facetedResult.value.csatScores);
 
     return {
         availableBrands,
